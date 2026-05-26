@@ -197,7 +197,7 @@ class DashboardApp:
         patient_id = item["values"][0]
         paciente = obtener_paciente_por_id(patient_id)
         if paciente:
-            ExpedienteModal(self.root, paciente)
+            ExpedienteModal(self.root, paciente, callback=self._load_patients)
 
     def _discharge_patient(self):
         selection = self.tree.selection()

@@ -227,6 +227,54 @@ def eliminar_paciente(patient_id):
         print(f"❌ Error al dar de alta: {e}")
         return False
 
+def actualizar_paciente(data):
+    if not PYMYSQL_AVAILABLE: return False
+    _ensure_sexo_column()
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            patient_id = data["id_paciente"]
+            has_sexo = _check_column_exists(cursor, "Pacientes", "sexo")
+            if has_sexo:
+                cursor.execute("""
+                    UPDATE Pacientes SET nombre=%s, apellido_paterno=%s, apellido_materno=%s, sexo=%s,
+                                         telefono=%s, direccion=%s, dia_nacimiento=%s, mes_nacimiento=%s, anio_nacimiento=%s
+                    WHERE id_paciente=%s
+                """, (data["nombre"], data["apellido_paterno"], data.get("apellido_materno", ""),
+                      data.get("sexo"), data.get("telefono", ""), data.get("direccion", ""),
+                      data.get("dia_nacimiento"), data.get("mes_nacimiento"), data.get("anio_nacimiento"),
+                      patient_id))
+            else:
+                cursor.execute("""
+                    UPDATE Pacientes SET nombre=%s, apellido_paterno=%s, apellido_materno=%s,
+                                         telefono=%s, direccion=%s, dia_nacimiento=%s, mes_nacimiento=%s, anio_nacimiento=%s
+                    WHERE id_paciente=%s
+                """, (data["nombre"], data["apellido_paterno"], data.get("apellido_materno", ""),
+                      data.get("telefono", ""), data.get("direccion", ""),
+                      data.get("dia_nacimiento"), data.get("mes_nacimiento"), data.get("anio_nacimiento"),
+                      patient_id))
+            cursor.execute("""
+                UPDATE Familiar SET nombre=%s, parentesco=%s, telefono=%s, direccion=%s
+                WHERE id_paciente=%s
+            """, (data.get("familiar_nombre", ""), data.get("familiar_parentesco", ""),
+                  data.get("familiar_telefono", ""), data.get("familiar_direccion", ""), patient_id))
+            cursor.execute("""
+                UPDATE Personal_Encargado SET nombre=%s, cargo=%s, telefono=%s
+                WHERE id_paciente=%s
+            """, (data.get("encargado_nombre", ""), data.get("encargado_cargo", ""),
+                  data.get("encargado_telefono", ""), patient_id))
+            cursor.execute("""
+                UPDATE Ingresos SET dia=%s, mes=%s, anio=%s, motivo=%s, observaciones=%s
+                WHERE id_paciente=%s
+            """, (data.get("dia_ingreso"), data.get("mes_ingreso"), data.get("anio_ingreso"),
+                  data.get("motivo_ingreso", ""), data.get("observaciones", ""), patient_id))
+            conn.commit()
+            print(f"✅ Paciente {patient_id} actualizado")
+            return True
+    except Exception as e:
+        print(f"❌ Error al actualizar paciente: {e}")
+        return False
+
 # Variable de compatibilidad para dashboard_gui.py
 PYODBC_AVAILABLE = PYMYSQL_AVAILABLE
 
