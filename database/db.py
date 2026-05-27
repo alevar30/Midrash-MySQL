@@ -63,79 +63,101 @@ def _ensure_sexo_column():
     except Exception as e:
         print(f"⚠️ No se pudo verificar/añadir columna sexo: {e}")
 
+def _has_sexo_column():
+    """Verifica si la columna sexo existe (cache simple)."""
+    if not PYMYSQL_AVAILABLE: return False
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            return _check_column_exists(cursor, "Pacientes", "sexo")
+    except:
+        return True  # Asumir que sí existe en caso de error
+
+def _build_paciente_query(where_clause="p.estado = 'Internado'"):
+    """Construye query con JOINs usando subqueries para obtener el último ingreso/egreso."""
+    has_sexo = _has_sexo_column()
+    sexo_col = "p.sexo," if has_sexo else ""
+    return f"""
+        SELECT p.id_paciente, p.nombre, p.apellido_paterno,
+               p.apellido_materno, {sexo_col} p.telefono, p.direccion,
+               p.dia_nacimiento, p.mes_nacimiento, p.anio_nacimiento,
+               p.estado,
+               f.nombre AS familiar_nombre, f.parentesco AS familiar_parentesco,
+               f.telefono AS familiar_telefono, f.direccion AS familiar_direccion,
+               e.nombre AS encargado_nombre, e.cargo AS encargado_cargo,
+               e.telefono AS encargado_telefono,
+               i.motivo AS motivo_ingreso, i.observaciones,
+               i.dia AS dia_ingreso, i.mes AS mes_ingreso, i.anio AS anio_ingreso,
+               eg.dia AS dia_egreso, eg.mes AS mes_egreso, eg.anio AS anio_egreso,
+               eg.motivo AS motivo_egreso
+        FROM Pacientes p
+        LEFT JOIN Familiar f ON p.id_paciente = f.id_paciente
+        LEFT JOIN Personal_Encargado e ON p.id_paciente = e.id_paciente
+        LEFT JOIN Ingresos i ON i.id_ingreso = (
+            SELECT MAX(i2.id_ingreso) FROM Ingresos i2 WHERE i2.id_paciente = p.id_paciente
+        )
+        LEFT JOIN Egresos eg ON eg.id_egreso = (
+            SELECT MAX(e2.id_egreso) FROM Egresos e2 WHERE e2.id_paciente = p.id_paciente
+        )
+        WHERE {where_clause}
+    """
+
+def _fill_sexo(pacientes):
+    for p in pacientes:
+        if "sexo" not in p:
+            p["sexo"] = ""
+    return pacientes
+
 def obtener_pacientes():
+    """Obtiene todos los pacientes internados."""
     if not PYMYSQL_AVAILABLE: return []
     _ensure_sexo_column()
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            has_sexo = _check_column_exists(cursor, "Pacientes", "sexo")
-            sexo_col = "p.sexo," if has_sexo else ""
-            query = f"""
-                SELECT p.id_paciente, p.nombre, p.apellido_paterno,
-                       p.apellido_materno, {sexo_col} p.telefono, p.direccion,
-                       p.dia_nacimiento, p.mes_nacimiento, p.anio_nacimiento,
-                       p.estado,
-                       f.nombre AS familiar_nombre, f.parentesco AS familiar_parentesco,
-                       f.telefono AS familiar_telefono, f.direccion AS familiar_direccion,
-                       e.nombre AS encargado_nombre, e.cargo AS encargado_cargo,
-                       e.telefono AS encargado_telefono,
-                       i.motivo AS motivo_ingreso, i.observaciones,
-                       i.dia AS dia_ingreso, i.mes AS mes_ingreso, i.anio AS anio_ingreso
-                FROM Pacientes p
-                LEFT JOIN Familiar f ON p.id_paciente = f.id_paciente
-                LEFT JOIN Personal_Encargado e ON p.id_paciente = e.id_paciente
-                LEFT JOIN Ingresos i ON p.id_paciente = i.id_paciente
-                WHERE p.estado = 'Internado'
-                ORDER BY p.id_paciente DESC
-            """
+            query = _build_paciente_query("p.estado = 'Internado'") + " ORDER BY p.id_paciente DESC"
             cursor.execute(query)
-            pacientes = cursor.fetchall()
-            for p in pacientes:
-                if "sexo" not in p: p["sexo"] = ""
-            return pacientes
+            return _fill_sexo(cursor.fetchall())
     except Exception as e:
         print(f"❌ Error al obtener pacientes: {e}")
         return []
 
-def buscar_pacientes(query_text):
+def obtener_pacientes_alta():
+    """Obtiene todos los pacientes dados de alta."""
     if not PYMYSQL_AVAILABLE: return []
     _ensure_sexo_column()
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            has_sexo = _check_column_exists(cursor, "Pacientes", "sexo")
-            sexo_col = "p.sexo," if has_sexo else ""
+            query = _build_paciente_query("p.estado = 'Alta'") + " ORDER BY p.id_paciente DESC"
+            cursor.execute(query)
+            return _fill_sexo(cursor.fetchall())
+    except Exception as e:
+        print(f"❌ Error al obtener pacientes dados de alta: {e}")
+        return []
+
+def buscar_pacientes(query_text, solo_internados=False):
+    """Busca pacientes por nombre. Si solo_internados=True filtra solo internados,
+    si False busca en TODOS los pacientes (incluyendo dados de alta)."""
+    if not PYMYSQL_AVAILABLE: return []
+    _ensure_sexo_column()
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
             search = f"%{query_text}%"
-            query = f"""
-                SELECT p.id_paciente, p.nombre, p.apellido_paterno,
-                       p.apellido_materno, {sexo_col} p.telefono, p.direccion,
-                       p.dia_nacimiento, p.mes_nacimiento, p.anio_nacimiento,
-                       p.estado,
-                       f.nombre AS familiar_nombre, f.parentesco AS familiar_parentesco,
-                       f.telefono AS familiar_telefono, f.direccion AS familiar_direccion,
-                       e.nombre AS encargado_nombre, e.cargo AS encargado_cargo,
-                       e.telefono AS encargado_telefono,
-                       i.motivo AS motivo_ingreso, i.observaciones,
-                       i.dia AS dia_ingreso, i.mes AS mes_ingreso, i.anio AS anio_ingreso
-                FROM Pacientes p
-                LEFT JOIN Familiar f ON p.id_paciente = f.id_paciente
-                LEFT JOIN Personal_Encargado e ON p.id_paciente = e.id_paciente
-                LEFT JOIN Ingresos i ON p.id_paciente = i.id_paciente
-                WHERE p.estado = 'Internado'
-                  AND (p.nombre LIKE %s OR p.apellido_paterno LIKE %s OR p.apellido_materno LIKE %s)
-                ORDER BY p.id_paciente DESC
-            """
+            if solo_internados:
+                where = "p.estado = 'Internado' AND (p.nombre LIKE %s OR p.apellido_paterno LIKE %s OR p.apellido_materno LIKE %s)"
+            else:
+                where = "(p.nombre LIKE %s OR p.apellido_paterno LIKE %s OR p.apellido_materno LIKE %s)"
+            query = _build_paciente_query(where) + " ORDER BY p.id_paciente DESC"
             cursor.execute(query, (search, search, search))
-            pacientes = cursor.fetchall()
-            for p in pacientes:
-                if "sexo" not in p: p["sexo"] = ""
-            return pacientes
+            return _fill_sexo(cursor.fetchall())
     except Exception as e:
         print(f"❌ Error al buscar pacientes: {e}")
         return []
 
 def obtener_paciente_por_id(patient_id):
+    """Obtiene un paciente por su ID (cualquier estado), con último ingreso y egreso."""
     if not PYMYSQL_AVAILABLE: return None
     _ensure_sexo_column()
     try:
@@ -153,17 +175,25 @@ def obtener_paciente_por_id(patient_id):
                        e.nombre AS encargado_nombre, e.cargo AS encargado_cargo,
                        e.telefono AS encargado_telefono,
                        i.motivo AS motivo_ingreso, i.observaciones,
-                       i.dia AS dia_ingreso, i.mes AS mes_ingreso, i.anio AS anio_ingreso
+                       i.dia AS dia_ingreso, i.mes AS mes_ingreso, i.anio AS anio_ingreso,
+                       eg.dia AS dia_egreso, eg.mes AS mes_egreso, eg.anio AS anio_egreso,
+                       eg.motivo AS motivo_egreso
                 FROM Pacientes p
                 LEFT JOIN Familiar f ON p.id_paciente = f.id_paciente
                 LEFT JOIN Personal_Encargado e ON p.id_paciente = e.id_paciente
-                LEFT JOIN Ingresos i ON p.id_paciente = i.id_paciente
+                LEFT JOIN Ingresos i ON i.id_ingreso = (
+                    SELECT MAX(i2.id_ingreso) FROM Ingresos i2 WHERE i2.id_paciente = p.id_paciente
+                )
+                LEFT JOIN Egresos eg ON eg.id_egreso = (
+                    SELECT MAX(e2.id_egreso) FROM Egresos e2 WHERE e2.id_paciente = p.id_paciente
+                )
                 WHERE p.id_paciente = %s
             """
             cursor.execute(query, (patient_id,))
             paciente = cursor.fetchone()
             if paciente:
-                if "sexo" not in paciente: paciente["sexo"] = ""
+                if "sexo" not in paciente:
+                    paciente["sexo"] = ""
                 return paciente
             return None
     except Exception as e:
@@ -171,6 +201,7 @@ def obtener_paciente_por_id(patient_id):
         return None
 
 def insertar_paciente(data):
+    """Registra un nuevo paciente con todos sus datos relacionados."""
     if not PYMYSQL_AVAILABLE: return False
     _ensure_sexo_column()
     try:
@@ -211,6 +242,7 @@ def insertar_paciente(data):
         return False
 
 def eliminar_paciente(patient_id):
+    """Da de alta a un paciente (cambio suave de estado)."""
     if not PYMYSQL_AVAILABLE: return False
     try:
         with get_connection() as conn:
@@ -228,6 +260,7 @@ def eliminar_paciente(patient_id):
         return False
 
 def actualizar_paciente(data):
+    """Actualiza los datos de un paciente y sus tablas relacionadas."""
     if not PYMYSQL_AVAILABLE: return False
     _ensure_sexo_column()
     try:
@@ -265,7 +298,9 @@ def actualizar_paciente(data):
                   data.get("encargado_telefono", ""), patient_id))
             cursor.execute("""
                 UPDATE Ingresos SET dia=%s, mes=%s, anio=%s, motivo=%s, observaciones=%s
-                WHERE id_paciente=%s
+                WHERE id_ingreso = (
+                    SELECT max_id FROM (SELECT MAX(id_ingreso) AS max_id FROM Ingresos WHERE id_paciente = %s) AS tmp
+                )
             """, (data.get("dia_ingreso"), data.get("mes_ingreso"), data.get("anio_ingreso"),
                   data.get("motivo_ingreso", ""), data.get("observaciones", ""), patient_id))
             conn.commit()
@@ -275,7 +310,27 @@ def actualizar_paciente(data):
         print(f"❌ Error al actualizar paciente: {e}")
         return False
 
-# Variable de compatibilidad para dashboard_gui.py
+def reinternar_paciente(patient_id, data):
+    """Reinterna a un paciente dado de alta: cambia estado y crea nuevo ingreso."""
+    if not PYMYSQL_AVAILABLE: return False
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE Pacientes SET estado = 'Internado' WHERE id_paciente = %s", (patient_id,))
+            cursor.execute("""
+                INSERT INTO Ingresos (id_paciente, dia, mes, anio, motivo, observaciones)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (patient_id,
+                  data.get("dia_ingreso"), data.get("mes_ingreso"), data.get("anio_ingreso"),
+                  data.get("motivo_ingreso", "Reinternación"), data.get("observaciones", "")))
+            conn.commit()
+            print(f"✅ Paciente {patient_id} reinternado")
+            return True
+    except Exception as e:
+        print(f"❌ Error al reinternar paciente: {e}")
+        return False
+
+# Variable de compatibilidad
 PYODBC_AVAILABLE = PYMYSQL_AVAILABLE
 
 if PYMYSQL_AVAILABLE:
